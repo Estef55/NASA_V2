@@ -19,6 +19,7 @@ import {
   Video,
 } from 'lucide-react';
 import { useCameraManager } from './useCameraManager';
+import { apiUrl } from './api';
 
 type Props = {
   api: (path: string, token: string, init?: RequestInit) => Promise<any>;
@@ -408,7 +409,7 @@ export default function PoseWorkspace({ api, token, lang, onRefresh }: Props) {
       try {
         const form = new FormData();
         form.append('file', blob, 'frame.jpg');
-        const res = await fetch('/api/pose/frame', {
+        const res = await fetch(apiUrl('/api/pose/frame'), {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: form,
@@ -584,7 +585,7 @@ export default function PoseWorkspace({ api, token, lang, onRefresh }: Props) {
     try {
       const payload = await new Promise<any>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/pose/process');
+        xhr.open('POST', apiUrl('/api/pose/process'));
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
         xhr.upload.onprogress = (ev) => {
@@ -1345,7 +1346,7 @@ function AuthorizedVideo({ url, token }: { url: string; token: string }) {
     let objectUrl = '';
     setFailed(false);
     setSource('');
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl(url), { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => {
         if (!response.ok) throw Error(`HTTP ${response.status}`);
         return response.blob();

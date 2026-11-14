@@ -8,7 +8,19 @@ from .security import auth, need, hash_password, verify_password
 from .services.health_baseline import calculate_baseline, create_deviation_alert
 
 app = FastAPI(title='LÁTIRA 2.0 API', version='2.0.0', description='Demo académica; no es dispositivo médico.')
-app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:5173','http://127.0.0.1:5173'], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
+cors_origins = ['http://localhost:5173', 'http://127.0.0.1:5173']
+cors_origins.extend(
+    origin.strip()
+    for origin in os.getenv('LATIRA_CORS_ORIGINS', '').split(',')
+    if origin.strip() and origin.strip() not in cors_origins
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*']
+)
 
 def init():
     with conn() as c:

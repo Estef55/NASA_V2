@@ -9,6 +9,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { useCameraManager } from './useCameraManager';
+import { apiUrl } from './api';
 import './workflow.css';
 
 type Props = {
@@ -539,7 +540,7 @@ export function ThermalCard({ api, token, lang, role }: Props) {
               key={item.id}
               onClick={async () => {
                 try {
-                  const r = await fetch(`/api/thermography/image/${item.id}`, {
+                  const r = await fetch(apiUrl(`/api/thermography/image/${item.id}`), {
                     headers: { Authorization: `Bearer ${token}` },
                   });
                   if (!r.ok) throw Error(`HTTP ${r.status}`);
