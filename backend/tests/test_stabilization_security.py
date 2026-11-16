@@ -68,16 +68,13 @@ class StabilizationSecurityTests(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as tmp:
                 fresh_db = Path(tmp) / "fresh.sqlite3"
-                c = sqlite3.connect(fresh_db)
-                try:
+                with sqlite3.connect(fresh_db) as c:
                     c.row_factory = sqlite3.Row
                     c.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, astronaut_id TEXT, active INTEGER DEFAULT 1)")
                     c.execute("CREATE TABLE assignments(medic_username TEXT NOT NULL, astronaut_id TEXT NOT NULL, PRIMARY KEY(medic_username, astronaut_id))")
                     ensure_demo_accounts(c)
                     count = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
                     self.assertEqual(count, 0)
-                finally:
-                    c.close()
 
     def test_pose_status_and_integrations_expose_full_flags_without_private_paths(self):
         st = self.client.get("/api/pose/status", headers=self.h("astro1"))

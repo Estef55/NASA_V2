@@ -301,13 +301,10 @@ class FinalStabilizationFixesTests(unittest.TestCase):
                 check=True,
             )
             self.assertTrue(json.loads(rst.stdout)["ok"])
-            db = sqlite3.connect(db_path)
-            try:
+            with sqlite3.connect(db_path) as db:
                 db.execute("PRAGMA foreign_keys=ON")
                 self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
-            finally:
-                db.close()
 
     def test_csv_report_always_emits_all_11_columns_matching_sqlite_and_rbac(self):
         expected_cols = [

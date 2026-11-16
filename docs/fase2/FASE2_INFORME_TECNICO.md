@@ -1,7 +1,7 @@
 # Informe Técnico de Cierre — Fase 2 (LÁTI con Voz e IA Generativa Externa)
 
-**Proyecto:** LÁTIRA 2.0
-**Base de partida:** `LATIRA_2.0_FASE1_DEMO_LOGIN.zip`
+**Proyecto:** LÁTIRA 2.0  
+**Base de partida:** `LATIRA_2.0_FASE1_DEMO_LOGIN.zip`  
 **Alcance:** Integración real de voz en el navegador (STT/TTS), adaptador server-side para modelo generativo externo (`lati_ai.py`), aislamiento de privacidad clínica y persistencia de conversaciones.
 
 ---

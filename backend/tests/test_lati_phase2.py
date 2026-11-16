@@ -341,8 +341,7 @@ class LatiPhase2Tests(unittest.TestCase):
     def test_legacy_conversations_table_migrates_without_losing_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             legacy_db = Path(tmp) / "legacy.sqlite3"
-            raw = sqlite3.connect(legacy_db)
-            try:
+            with sqlite3.connect(legacy_db) as raw:
                 raw.execute(
                     "CREATE TABLE conversations(id INTEGER PRIMARY KEY, astronaut_id TEXT NOT NULL, "
                     "role TEXT NOT NULL, content TEXT NOT NULL, origin TEXT NOT NULL, created_at TEXT NOT NULL)"
@@ -351,9 +350,6 @@ class LatiPhase2Tests(unittest.TestCase):
                     "INSERT INTO conversations(astronaut_id,role,content,origin,created_at) "
                     "VALUES('AST-001','user','Mensaje previo','rules_local','2026-01-01T00:00:00Z')"
                 )
-                raw.commit()
-            finally:
-                raw.close()
 
             old_db, old_main_db = database.DB, main.DB
             database.DB = main.DB = legacy_db

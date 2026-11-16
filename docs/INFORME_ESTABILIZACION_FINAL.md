@@ -1,7 +1,7 @@
 # Informe de Estabilización Final — LÁTIRA 2.0
 
-**Entregable:** `LATIRA_2.0_RELEASE_CANDIDATA.zip` (raíz única `LATIRA_2.0/`)
-**Arquitectura preservada:** React 19 + TypeScript + Vite 8 + Tailwind CSS (`frontend/`) · FastAPI + Pydantic + SQLite (`backend/`) · IA / Pose / NASA / Termografía (`ai/`).
+**Entregable:** `LATIRA_2.0_RELEASE_CANDIDATA.zip` (raíz única `LATIRA_2.0/`)  
+**Arquitectura preservada:** React 19 + TypeScript + Vite 8 + Tailwind CSS (`frontend/`) · FastAPI + Pydantic + SQLite (`backend/`) · IA / Pose / NASA / Termografía (`ai/`).  
 **Descargo de responsabilidad:** Prototipo académico demostrativo. No es un dispositivo médico ni sustituye evaluación clínica profesional.
 
 ---
