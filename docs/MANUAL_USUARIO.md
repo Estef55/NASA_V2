@@ -1,7 +1,7 @@
 # Guía rápida de usuario y demostración
 
 ## Acceso
-Ejecuta backend y frontend según `README.md` y abre la URL local. En una base nueva, las cuentas de demostración se crean únicamente si `LATIRA_DEMO_PASSWORD` se define antes del primer inicio; la clave no se incluye en el repositorio. No uses usuarios demo en un servidor público.
+Ejecuta backend y frontend según `README.md` y abre la URL local. En modo demostración (`LATIRA_ENV=demo`, predeterminado en `run.sh` y `run.bat`), selecciona directamente el perfil (**Astronauta**, **Médico** o **Administrador**) sin contraseña. En modo producción (`LATIRA_ENV=production`), el acceso sin contraseña queda bloqueado y se exige usuario y contraseña. No uses usuarios demo en un servidor público.
 
 ## Recorrido sugerido
 1. Entra con el rol astronauta (`astro_demo`) y revisa el estado del resumen (`LIVE MONITORING` o `DEMO DATA`), los indicadores, la gráfica y la disponibilidad de línea base personal (requiere mínimo 3 muestras por indicador; si hay historial insuficiente, la interfaz lo indica).
@@ -20,7 +20,7 @@ Usa exclusivamente videos con consentimiento y autorización. En **Movimiento (P
 ## Astronauta: mediciones, LÁTI y termografía
 - En «Registro real», ingresa el valor, unidad, origen y fecha/hora del indicador, y guarda solo observaciones reales. Los registros demo y los reales nunca se mezclan en la línea base ni en las tablas activas.
 - En «Chequeo diario», registra fatiga y ánimo en las escalas `1–5` (`Bajo` / `Alto`). El chequeo es autorreporte.
-- En «LÁTI», la conversación se conserva por cuenta autenticado (`rules_local`). Consulta tus registros reales, línea base, chequeos, alertas abiertas o referencias científicas NASA/CSA sin diagnóstico ni prescripción.
+- En «LÁTI», la conversación se conserva por cuenta autenticada (incluyendo mensajes escritos `Texto` y dictados por micrófono `Voz`). Puedes hablar pulsando el micrófono, escuchar las respuestas habladas o silenciarlas/detenerlas en cualquier momento. LÁTI consulta localmente tus registros reales, línea base, chequeos y alertas abiertas (sin enviar telemetría privada al proveedor externo), responde referencias NASA/CSA verificadas y utiliza el modelo generativo externo configurado en el servidor (o respaldo local honesto si no hay clave API) sin diagnosticar ni prescribir.
 - En «Imagen térmica» se suben o capturan imágenes para revisión visual. Una cámara convencional no estima temperatura corporal central.
 
 ## Profesional médico

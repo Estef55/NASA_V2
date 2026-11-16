@@ -58,20 +58,43 @@ def _resolve_model_target(model_name: str) -> str:
     if p.is_file():
         return str(p)
     repo_root = Path(__file__).resolve().parents[1]
-    for cand in (repo_root / model_name, repo_root / "ai" / model_name, repo_root / "backend" / model_name):
+    for cand in (
+        repo_root / "models" / model_name,
+        repo_root / model_name,
+        repo_root / "ai" / model_name,
+        repo_root / "backend" / model_name,
+    ):
         if cand.is_file():
             return str(cand)
     return model_name
 
 
+def _ensure_yolo_enabled() -> None:
+    from .setup_yolo import is_yolo_enabled
+
+    if not is_yolo_enabled():
+        with _MODEL_LOCK:
+            _MODEL_CACHE.clear()
+        raise RuntimeError("YOLO Pose is not_configured (lightweight mode active)")
+
+
 def _get_yolo_model(model_name: str):
+    _ensure_yolo_enabled()
+    from .setup_yolo import find_weights_file, is_valid_weights_file
+
     try:
         from ultralytics import YOLO
     except ImportError as exc:
         raise RuntimeError(
             "YOLO processing requires optional dependencies: pip install -r ai/requirements.txt"
         ) from exc
-    resolved = _resolve_model_target(model_name)
+    _, found = find_weights_file(model_name)
+    if found is None or not is_valid_weights_file(found):
+        raise RuntimeError(
+            f"YOLO model not_configured or invalid weights ({Path(model_name).name}); "
+            "run install_yolo.sh / install_yolo.bat"
+        )
+    resolved = str(found)
     with _MODEL_LOCK:
         cached = _MODEL_CACHE.get(resolved)
         if cached is not None:
@@ -79,7 +102,7 @@ def _get_yolo_model(model_name: str):
         try:
             detector = YOLO(resolved)
         except Exception as exc:
-            raise RuntimeError(f"YOLO model unavailable ({model_name}): {exc}") from exc
+            raise RuntimeError(f"YOLO model unavailable ({Path(model_name).name}): {exc}") from exc
         _MODEL_CACHE[resolved] = detector
         return detector
 
@@ -205,6 +228,7 @@ def process_video(
     source_mode: str = "upload",
     display_name: str | None = None,
 ) -> dict:
+    _ensure_yolo_enabled()
     source = validate_video_upload(video_path)
     model_name = model or os.getenv("YOLO_POSE_MODEL", "yolo11n-pose.pt")
     detector = _get_yolo_model(model_name)
@@ -320,6 +344,7 @@ def process_frame_bytes(
     confidence: float = 0.25,
 ) -> dict[str, Any]:
     """Run real YOLO Pose inference on a single JPEG/PNG image frame for live camera tracking."""
+    _ensure_yolo_enabled()
     if not frame_bytes:
         raise ValueError("Empty frame payload")
     model_name = model or os.getenv("YOLO_POSE_MODEL", "yolo11n-pose.pt")

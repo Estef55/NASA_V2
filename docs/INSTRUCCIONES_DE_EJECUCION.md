@@ -20,15 +20,22 @@
 La aplicación no carga automáticamente archivos `.env`; define las variables en tu terminal antes de iniciar el backend (puedes tomar como referencia `LATIRA_2.0/.env.example`):
 
 ```bash
+# Modo de ejecución: 'demo' habilita selector sin contraseña para demostración; 'production' exige clave
+export LATIRA_ENV="production"
+export LATIRA_DEMO_LOGIN="false"
+export LATIRA_CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+
 # Base de datos SQLite local (fuera del repositorio en producción/pruebas)
 export LATIRA_DB_PATH="./data/database/latira.sqlite3"
 
-# Opcional: siembra las cuentas demo (astro_demo, medic_demo, admin_demo)
-# SOLO cuando la base de datos esté vacía. Nunca guardes claves reales en el código.
-export LATIRA_DEMO_PASSWORD="TuClaveLocalFuerte"
+# Modelo generativo externo para LÁTI (solo en el servidor; nunca en el frontend)
+# Opción Google AI Studio / Gemini:
+export GEMINI_API_KEY=""
+export LATIRA_LLM_MODEL="gemini-4-hydrogen"
+export LATIRA_LLM_TIMEOUT_SECONDS="15"
 
 # Configuración YOLO Pose
-export YOLO_POSE_MODEL="yolo11n-pose.pt"
+export YOLO_POSE_MODEL="./models/yolo11n-pose.pt"
 export POSE_STORAGE_DIR="./data/pose"
 export POSE_HISTORY_DB="./data/pose/history.sqlite3"
 export POSE_MAX_UPLOAD_BYTES=104857600
@@ -39,7 +46,7 @@ export LATIRA_THERMAL_DIR="./data/uploads/thermography"
 
 ---
 
-## 3. Instalación del backend y dependencias de YOLO Pose
+## 3. Instalación del backend, frontend y dependencias de YOLO Pose
 
 Desde la raíz del proyecto descomprimido (`LATIRA_2.0/`):
 
@@ -47,45 +54,41 @@ Desde la raíz del proyecto descomprimido (`LATIRA_2.0/`):
 ```bash
 cd LATIRA_2.0
 python3 -m venv backend/.venv
-source backend/.venv/bin/activate
-pip install --upgrade pip
-pip install -r backend/requirements.txt
+backend/.venv/bin/python -m pip install -r backend/requirements.txt
 
-# Opcional recomendado: habilitar inferencia real YOLO Pose (CPU)
-pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-pip install -r ai/requirements.txt
+# Frontend reproducible desde package-lock.json
+cd frontend && npm ci && cd ..
+
+# Opcional recomendado: preparar YOLO Pose, resolver OpenCV Headless y probar inferencia real
+./install_yolo.sh
 ```
 
 ### Windows (PowerShell)
 ```powershell
 cd LATIRA_2.0
-py -m venv backend\.venv
-backend\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r backend\requirements.txt
+py -3 -m venv backend\.venv
+backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 
-# Opcional recomendado: habilitar inferencia real YOLO Pose (CPU)
-pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-pip install -r ai\requirements.txt
+# Frontend reproducible desde package-lock.json
+Push-Location frontend; npm ci; Pop-Location
+
+# Opcional recomendado: preparar YOLO Pose, resolver OpenCV Headless y probar inferencia real
+.\install_yolo.bat
 ```
-*(Alternativamente en Windows puedes usar `.\install_yolo.bat`.)*
 
 ---
 
 ## 4. Configuración de los pesos de YOLO Pose (`yolo11n-pose.pt`)
 
-El archivo binario `yolo11n-pose.pt` (~6.0 MB, licencia AGPL-3.0 de Ultralytics) **no se redistribuye dentro del ZIP** para mantener el paquete limpio y liviano.
+El archivo binario `yolo11n-pose.pt` (~6.0 MB, licencia AGPL-3.0 de Ultralytics) **no se redistribuye dentro del ZIP** para mantener el paquete limpio y evitar binarios duplicados.
 
-Opciones para disponer de los pesos:
-1. **Descarga automática de Ultralytics**: al ejecutar el primer análisis de pose (o ejecutando el comando siguiente con acceso a internet), Ultralytics descarga `yolo11n-pose.pt`:
-   ```bash
-   backend/.venv/bin/python -c "from ultralytics import YOLO; YOLO('yolo11n-pose.pt')"
-   ```
-2. **Ruta explícita local**: coloca el archivo `.pt` dentro de `LATIRA_2.0/` o apunta `YOLO_POSE_MODEL` a tu archivo local:
+Opciones para disponer de los pesos en `models/yolo11n-pose.pt`:
+1. **Instalador reproducible (recomendado)**: `./install_yolo.sh` o `.\install_yolo.bat` (invocan `ai/setup_yolo.py --install`) descargan atómicamente `yolo11n-pose.pt`, verifican tamaño e integridad ZIP, cargan el modelo y ejecutan una inferencia real sobre fotograma sintético.
+2. **Ruta explícita local**: coloca el archivo `.pt` en `LATIRA_2.0/models/yolo11n-pose.pt` o apunta `YOLO_POSE_MODEL` a tu archivo local:
    ```bash
    export YOLO_POSE_MODEL="/ruta/absoluta/yolo11n-pose.pt"
    ```
-3. **Si no hay pesos ni dependencias instaladas**: la aplicación sigue funcionando normalmente en todas las demás áreas y el backend responde honestamente `503` / `not_configured` en `/api/pose/status`, `/api/pose/frame` y `/api/pose/process` sin inventar resultados.
+3. **Modo ligero (`--light` o `LATIRA_SKIP_YOLO_SETUP=1`)**: la aplicación funciona normalmente en todas las demás áreas sin descargar PyTorch ni pesos, y el backend responde honestamente `503` / `not_configured` en `/api/pose/status`, `/api/pose/frame` y `/api/pose/process` sin inventar resultados.
 
 ---
 
@@ -94,10 +97,10 @@ Opciones para disponer de los pesos:
 ### Arranque rápido todo-en-uno
 ```bash
 cd LATIRA_2.0
-export LATIRA_DEMO_PASSWORD="TuClaveLocalFuerte"
-./run.sh
+./run.sh --full    # Instala/verifica núcleo + YOLO Pose con prueba real
+./run.sh --light   # Solo núcleo general (equivalente a LATIRA_SKIP_YOLO_SETUP=1 ./run.sh)
 ```
-*(En Windows: `$env:LATIRA_DEMO_PASSWORD="TuClaveLocalFuerte"; .\run.bat`)*
+*(En Windows: `.\run.bat --full` o `.\run.bat --light`.)*
 
 ### Arranque manual en dos terminales
 
@@ -130,7 +133,7 @@ Los navegadores modernos aplican restricciones estrictas sobre `navigator.mediaD
 
 ## 7. Cómo probar paso a paso Pose en vivo, grabación y carga de video
 
-1. **Inicia sesión** como `astro_demo` (o `medic_demo` / `admin_demo`) con la contraseña definida en `LATIRA_DEMO_PASSWORD`.
+1. **Inicia sesión** seleccionando el perfil **Astronauta** (o **Médico** / **Administrador**) en el selector de demostración con `LATIRA_ENV=demo` (o mediante usuario y contraseña si ejecutas en `LATIRA_ENV=production`).
 2. Entra en **Movimiento (Pose)** en la barra lateral. Verifica el distintivo superior **Modelo YOLO Pose disponible** (o el aviso técnico si faltan pesos).
 3. **Modo 1 — Cámara en vivo**:
    - Pulsa **Abrir cámara** y acepta el permiso del navegador. Si dispones de varias cámaras, utiliza el selector **Cambiar cámara**.

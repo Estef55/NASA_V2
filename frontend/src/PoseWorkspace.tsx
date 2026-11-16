@@ -19,7 +19,7 @@ import {
   Video,
 } from 'lucide-react';
 import { useCameraManager } from './useCameraManager';
-import { apiUrl } from './api';
+import { apiUrl } from './apiConfig';
 
 type Props = {
   api: (path: string, token: string, init?: RequestInit) => Promise<any>;
@@ -85,8 +85,10 @@ const copy = {
     historyTitle: 'Analysis history',
     historyEmpty: 'No movement analyses saved yet.',
     deleteAnalysis: 'Delete',
-    modelReady: 'YOLO Pose model ready',
-    modelUnavailable: 'YOLO Pose backend dependencies or weights are not configured',
+    modelReady: 'YOLO Pose ready (Full mode)',
+    modelUnavailable: 'YOLO Pose unavailable (Lightweight core mode)',
+    fullMode: 'Full mode',
+    lightMode: 'Lightweight mode',
     noFramesCaptured: 'No frames were processed yet. Keep a person visible in front of the camera for a couple of seconds before stopping.',
     recorderUnsupported: 'Video recording is not supported in this browser. Try Live camera or Upload video.',
     viewDetails: 'View report',
@@ -141,8 +143,10 @@ const copy = {
     historyTitle: 'Historial de análisis',
     historyEmpty: 'Aún no hay análisis de movimiento guardados.',
     deleteAnalysis: 'Eliminar',
-    modelReady: 'Modelo YOLO Pose disponible',
-    modelUnavailable: 'Dependencias o pesos de YOLO Pose no configurados en el servidor',
+    modelReady: 'YOLO Pose disponible (Modo completo)',
+    modelUnavailable: 'YOLO Pose no disponible (Modo ligero)',
+    fullMode: 'Modo completo',
+    lightMode: 'Modo ligero',
     noFramesCaptured: 'No se alcanzaron a procesar fotogramas. Mantén a la persona visible unos segundos antes de detener.',
     recorderUnsupported: 'Este navegador no admite grabación directa. Puedes usar Cámara en vivo o Subir video.',
     viewDetails: 'Ver informe',
@@ -409,7 +413,7 @@ export default function PoseWorkspace({ api, token, lang, onRefresh }: Props) {
       try {
         const form = new FormData();
         form.append('file', blob, 'frame.jpg');
-        const res = await fetch(apiUrl('/api/pose/frame'), {
+        const res = await fetch(apiUrl('/pose/frame'), {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: form,
@@ -585,7 +589,7 @@ export default function PoseWorkspace({ api, token, lang, onRefresh }: Props) {
     try {
       const payload = await new Promise<any>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', apiUrl('/api/pose/process'));
+        xhr.open('POST', apiUrl('/pose/process'));
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
         xhr.upload.onprogress = (ev) => {
@@ -702,17 +706,20 @@ export default function PoseWorkspace({ api, token, lang, onRefresh }: Props) {
             <h3>{t.title}</h3>
             <p className="muted pose-subtitle">{t.subtitle}</p>
           </div>
-          <span className={`pose-engine-state ${poseStatus?.status === 'configured' ? 'ready' : 'pending'}`}>
-            {poseStatus?.status === 'configured' ? t.modelReady : t.modelUnavailable}
+          <span className={`pose-engine-state ${poseStatus?.status === 'available' || poseStatus?.status === 'configured' ? 'ready' : 'pending'}`}>
+            {poseStatus?.status === 'available' || poseStatus?.status === 'configured' ? t.modelReady : t.modelUnavailable}
           </span>
         </div>
 
-        {poseStatus && poseStatus.status !== 'configured' && (
+        {poseStatus && (poseStatus.status !== 'available' && poseStatus.status !== 'configured') && (
           <div className="pose-info-banner">
             <Info size={16} />
             <div>
-              <strong>{t.modelUnavailable}</strong>
+              <strong>{t.modelUnavailable} · {poseStatus.mode === 'full' ? t.fullMode : t.lightMode}</strong>
               <p>{poseStatus.reason}</p>
+              <p style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
+                PyTorch: {poseStatus.torch_installed ? 'OK' : 'No'} · Ultralytics: {poseStatus.ultralytics_installed ? 'OK' : 'No'} · OpenCV: {poseStatus.opencv_installed ? 'OK' : 'No'} · {lang === 'es' ? 'Pesos' : 'Weights'}: {poseStatus.weights_present ? 'OK' : 'No'} · {lang === 'es' ? 'Carga' : 'Load'}: {poseStatus.model_loadable ? 'OK' : 'No'} · {lang === 'es' ? 'Inferencia' : 'Inference'}: {poseStatus.inference_ready ? 'OK' : 'No'}
+              </p>
             </div>
           </div>
         )}
@@ -1346,7 +1353,8 @@ function AuthorizedVideo({ url, token }: { url: string; token: string }) {
     let objectUrl = '';
     setFailed(false);
     setSource('');
-    fetch(apiUrl(url), { headers: { Authorization: `Bearer ${token}` } })
+    const resolvedUrl = url.startsWith('/api') ? apiUrl(url) : url;
+    fetch(resolvedUrl, { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => {
         if (!response.ok) throw Error(`HTTP ${response.status}`);
         return response.blob();

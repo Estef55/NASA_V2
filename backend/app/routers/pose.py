@@ -43,6 +43,13 @@ def _auth(authorization: str | None):
     return auth(authorization)
 
 
+def _ensure_pose_runtime_enabled() -> None:
+    from ai.setup_yolo import is_yolo_enabled
+
+    if not is_yolo_enabled():
+        raise HTTPException(503, "YOLO Pose is not_configured (lightweight mode active)")
+
+
 def _settings():
     root = Path(os.getenv("POSE_STORAGE_DIR", Path(__file__).resolve().parents[3] / "data" / "pose"))
     history = Path(os.getenv("POSE_HISTORY_DB", root / "history.sqlite3"))
@@ -166,7 +173,7 @@ def pose_status(authorization: str | None = Header(default=None)):
     info = _pose_integration_status()
     return {
         **info,
-        "model": os.getenv("YOLO_POSE_MODEL", "yolo11n-pose.pt"),
+        "model": info.get("model") or Path(os.getenv("YOLO_POSE_MODEL", "yolo11n-pose.pt")).name,
         "live_endpoint": "/api/pose/frame",
         "upload_endpoint": "/api/pose/process",
     }
@@ -181,14 +188,15 @@ async def analyze_live_frame(
     from app.main import need
 
     need(user, "astronaut", "medic", "admin")
+    _ensure_pose_runtime_enabled()
     payload = await file.read(MAX_FRAME_BYTES + 1)
     _validate_image_frame(payload)
     try:
         return process_frame_bytes(payload)
     except RuntimeError as exc:
         msg = str(exc).lower()
-        if "optional dependencies" in msg or "ultralytics" in msg or "model unavailable" in msg:
-            raise HTTPException(503, "Optional YOLO Pose dependencies/model unavailable") from exc
+        if "not_configured" in msg or "optional dependencies" in msg or "ultralytics" in msg or "model unavailable" in msg:
+            raise HTTPException(503, "YOLO Pose not_configured / unavailable in current mode") from exc
         raise HTTPException(422, "Frame processing failed") from exc
     except ValueError as exc:
         raise HTTPException(415, str(exc)) from exc
@@ -205,6 +213,7 @@ def complete_live_session(
     from app.main import need
 
     need(user, "astronaut", "medic", "admin")
+    _ensure_pose_runtime_enabled()
     _, history, _ = _settings()
 
     frames = [f.model_dump() for f in data.frames]
@@ -254,6 +263,7 @@ async def upload_video(
     from app.main import need
 
     need(user, "astronaut", "medic", "admin")
+    _ensure_pose_runtime_enabled()
     normalized_mode = source_mode if source_mode in {"upload", "recording"} else "upload"
     root, history, limit = _settings()
     uploads = root / "uploads"
@@ -276,8 +286,8 @@ async def upload_video(
                 record = process_video(uploads_path, outputs)
         except RuntimeError as exc:
             msg = str(exc).lower()
-            if "optional dependencies" in msg or "ultralytics" in msg or "model unavailable" in msg:
-                raise HTTPException(503, "Optional YOLO Pose dependencies/model unavailable") from exc
+            if "not_configured" in msg or "optional dependencies" in msg or "ultralytics" in msg or "model unavailable" in msg:
+                raise HTTPException(503, "YOLO Pose not_configured / unavailable in current mode") from exc
             raise HTTPException(422, "Video processing failed") from exc
         except Exception as exc:
             raise HTTPException(422, "Video processing failed") from exc

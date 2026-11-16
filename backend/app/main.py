@@ -6,21 +6,82 @@ from pydantic import BaseModel, Field
 from .database import DB, conn
 from .security import auth, need, hash_password, verify_password
 from .services.health_baseline import calculate_baseline, create_deviation_alert
+from .services.lati_ai import get_lati_llm_status, verify_lati_llm_connection
 
 app = FastAPI(title='LÁTIRA 2.0 API', version='2.0.0', description='Demo académica; no es dispositivo médico.')
-cors_origins = ['http://localhost:5173', 'http://127.0.0.1:5173']
-cors_origins.extend(
-    origin.strip()
-    for origin in os.getenv('LATIRA_CORS_ORIGINS', '').split(',')
-    if origin.strip() and origin.strip() not in cors_origins
+_raw_cors = os.getenv('LATIRA_CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173')
+_cors_origins = [origin.strip() for origin in _raw_cors.split(',') if origin.strip() and origin.strip() != '*']
+app.add_middleware(CORSMiddleware, allow_origins=_cors_origins or ['http://localhost:5173','http://127.0.0.1:5173'], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
+
+DEMO_PROFILE_SPECS = (
+    {
+        'profile': 'astronaut',
+        'username': 'astro_demo',
+        'role': 'astronaut',
+        'astronaut_id': 'AST-001',
+        'label_es': 'Astronauta',
+        'label_en': 'Astronaut',
+        'summary_es': 'Tripulante asignado (AST-001): resumen, chequeo diario, registro real, LÁTI y análisis de movimiento.',
+        'summary_en': 'Assigned crew member (AST-001): overview, daily check-in, real monitoring, LÁTI, and pose analysis.',
+    },
+    {
+        'profile': 'medic',
+        'username': 'medic_demo',
+        'role': 'medic',
+        'astronaut_id': None,
+        'label_es': 'Médico',
+        'label_en': 'Medical officer',
+        'summary_es': 'Personal médico con acceso exclusivo a tripulación asignada (AST-001), alertas, seguimientos y reportes.',
+        'summary_en': 'Medical officer scoped exclusively to assigned crew (AST-001), clinical alerts, follow-ups, and reports.',
+    },
+    {
+        'profile': 'admin',
+        'username': 'admin_demo',
+        'role': 'admin',
+        'astronaut_id': None,
+        'label_es': 'Administrador',
+        'label_en': 'Administrator',
+        'summary_es': 'Administración del sistema con aislamiento clínico RBAC: cuentas, asignaciones e integraciones.',
+        'summary_en': 'RBAC-isolated system administration: accounts, assignments, and integrations.',
+    },
 )
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*']
-)
+DEMO_PROFILE_MAP = {spec['profile']: spec for spec in DEMO_PROFILE_SPECS}
+
+
+def is_demo_auth_enabled() -> bool:
+    env = os.getenv('LATIRA_ENV', 'production').strip().lower()
+    flag = os.getenv('LATIRA_DEMO_LOGIN', '').strip().lower()
+    if flag in ('0', 'false', 'no', 'off'):
+        return False
+    return env == 'demo'
+
+
+def ensure_demo_accounts(c) -> None:
+    demo_mode = is_demo_auth_enabled()
+    demo_password = os.getenv('LATIRA_DEMO_PASSWORD')
+    if demo_mode:
+        seed_secret = demo_password or secrets.token_urlsafe(32)
+        for spec in DEMO_PROFILE_SPECS:
+            exists = c.execute('SELECT 1 FROM users WHERE username=?', (spec['username'],)).fetchone()
+            if not exists:
+                c.execute(
+                    'INSERT INTO users(username,password_hash,role,astronaut_id) VALUES(?,?,?,?)',
+                    (spec['username'], hash_password(seed_secret), spec['role'], spec['astronaut_id']),
+                )
+        c.execute(
+            "INSERT OR IGNORE INTO assignments(medic_username,astronaut_id) "
+            "SELECT 'medic_demo','AST-001' "
+            "WHERE EXISTS(SELECT 1 FROM users WHERE username='medic_demo' AND role='medic') "
+            "AND EXISTS(SELECT 1 FROM users WHERE astronaut_id='AST-001' AND role='astronaut')"
+        )
+    elif not c.execute('SELECT 1 FROM users LIMIT 1').fetchone() and demo_password:
+        for spec in DEMO_PROFILE_SPECS:
+            c.execute(
+                'INSERT INTO users(username,password_hash,role,astronaut_id) VALUES(?,?,?,?)',
+                (spec['username'], hash_password(demo_password), spec['role'], spec['astronaut_id']),
+            )
+        c.execute("INSERT OR IGNORE INTO assignments(medic_username,astronaut_id) SELECT 'medic_demo','AST-001' WHERE EXISTS(SELECT 1 FROM users WHERE username='medic_demo')")
+
 
 def init():
     with conn() as c:
@@ -28,22 +89,31 @@ def init():
         CREATE TABLE IF NOT EXISTS metrics(id INTEGER PRIMARY KEY, astronaut_id TEXT NOT NULL, day INTEGER, recorded_at TEXT NOT NULL, sleep REAL, heart_rate REAL, fatigue INTEGER, mood INTEGER, source TEXT NOT NULL, demo INTEGER DEFAULT 0, unit TEXT);
         CREATE TABLE IF NOT EXISTS checkins(id INTEGER PRIMARY KEY, astronaut_id TEXT, created_at TEXT, fatigue INTEGER, mood INTEGER, note TEXT, demo INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY, astronaut_id TEXT, metric_id INTEGER, created_at TEXT, priority TEXT, reason TEXT, status TEXT DEFAULT 'pending', demo INTEGER DEFAULT 0, UNIQUE(metric_id,reason));
-        CREATE TABLE IF NOT EXISTS followups(id INTEGER PRIMARY KEY, alert_id INTEGER, author TEXT, note TEXT, created_at TEXT);
+        CREATE TABLE IF NOT EXISTS followups(id INTEGER PRIMARY KEY, alert_id INTEGER REFERENCES alerts(id), author TEXT, note TEXT, created_at TEXT);
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, actor TEXT, action TEXT, created_at TEXT);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, username TEXT, expires TEXT);
         CREATE TABLE IF NOT EXISTS conversations(id INTEGER PRIMARY KEY,astronaut_id TEXT NOT NULL,role TEXT NOT NULL,content TEXT NOT NULL,origin TEXT NOT NULL,created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS assignments(medic_username TEXT NOT NULL REFERENCES users(username), astronaut_id TEXT NOT NULL, PRIMARY KEY(medic_username, astronaut_id));
         CREATE TABLE IF NOT EXISTS demo_state(id INTEGER PRIMARY KEY CHECK(id=1), day INTEGER DEFAULT 0, active INTEGER DEFAULT 0); INSERT OR IGNORE INTO demo_state(id) VALUES(1);
         CREATE TABLE IF NOT EXISTS demo_owner_state(astronaut_id TEXT PRIMARY KEY, day INTEGER DEFAULT 0, active INTEGER DEFAULT 0);''')
-        demo_password=os.getenv('LATIRA_DEMO_PASSWORD')
-        if not c.execute('SELECT 1 FROM users LIMIT 1').fetchone() and demo_password:
-            for uname,role,aid in [('astro_demo','astronaut','AST-001'),('medic_demo','medic',None),('admin_demo','admin',None)]:
-                c.execute('INSERT INTO users(username,password_hash,role,astronaut_id) VALUES(?,?,?,?)',(uname,hash_password(demo_password),role,aid))
-        c.execute("INSERT OR IGNORE INTO assignments(medic_username,astronaut_id) SELECT 'medic_demo','AST-001' WHERE EXISTS(SELECT 1 FROM users WHERE username='medic_demo')")
+        ensure_demo_accounts(c)
         if 'unit' not in [r['name'] for r in c.execute('PRAGMA table_info(metrics)')]: c.execute('ALTER TABLE metrics ADD COLUMN unit TEXT')
+        conv_cols = {r['name'] for r in c.execute('PRAGMA table_info(conversations)')}
+        if 'input_mode' not in conv_cols:
+            c.execute("ALTER TABLE conversations ADD COLUMN input_mode TEXT DEFAULT 'text'")
+        if 'context_source' not in conv_cols:
+            c.execute("ALTER TABLE conversations ADD COLUMN context_source TEXT DEFAULT 'rules_local'")
+        if 'model' not in conv_cols:
+            c.execute('ALTER TABLE conversations ADD COLUMN model TEXT')
+        if 'client_message_id' not in conv_cols:
+            c.execute('ALTER TABLE conversations ADD COLUMN client_message_id TEXT')
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_client_msg ON conversations(astronaut_id, role, client_message_id) WHERE client_message_id IS NOT NULL')
 init()
 
 class Login(BaseModel): username:str; password:str
+class DemoLogin(BaseModel):
+    model_config = {'extra': 'forbid'}
+    profile: str
 class Checkin(BaseModel): fatigue:int=Field(ge=1,le=5); mood:int=Field(ge=1,le=5); note:str=''; language:str='es'
 class Followup(BaseModel): note:str=Field(min_length=1,max_length=2000)
 
@@ -57,6 +127,59 @@ def health():
     except Exception:
         nasa_status = 'catalogued_reference_only'
     return {'status':'ok','database':'connected','demo_mode':'separate demo flag','medical_device':False,'nasa_source':nasa_status}
+def _issue_session(c, username: str) -> str:
+    token = secrets.token_urlsafe(32)
+    expiry = datetime.now(timezone.utc).timestamp() + int(os.getenv('LATIRA_SESSION_TTL_SECONDS', '43200'))
+    exp = datetime.fromtimestamp(expiry, timezone.utc).isoformat()
+    c.execute('INSERT INTO sessions VALUES(?,?,?)', (token, username, exp))
+    return token
+
+
+@app.get('/api/auth/demo-profiles')
+def demo_profiles():
+    if not is_demo_auth_enabled():
+        env = os.getenv('LATIRA_ENV', 'production').strip().lower() or 'production'
+        return {'enabled': False, 'environment': 'demo_disabled' if env == 'demo' else env, 'profiles': []}
+    with conn() as c:
+        ensure_demo_accounts(c)
+        profiles = []
+        for spec in DEMO_PROFILE_SPECS:
+            row = c.execute(
+                'SELECT username, role, astronaut_id, active FROM users WHERE username=?',
+                (spec['username'],),
+            ).fetchone()
+            if row and row['active'] == 1 and row['role'] == spec['role']:
+                profiles.append({
+                    'profile': spec['profile'],
+                    'role': row['role'],
+                    'astronaut_id': row['astronaut_id'],
+                    'label_es': spec['label_es'],
+                    'label_en': spec['label_en'],
+                    'summary_es': spec['summary_es'],
+                    'summary_en': spec['summary_en'],
+                })
+    return {'enabled': True, 'environment': 'demo', 'profiles': profiles}
+
+
+@app.post('/api/auth/demo-login')
+def demo_login(data: DemoLogin):
+    if not is_demo_auth_enabled():
+        raise HTTPException(403, 'El acceso de demostración sin contraseña solo está habilitado en entorno demo')
+    spec = DEMO_PROFILE_MAP.get(data.profile.strip().lower())
+    if not spec:
+        raise HTTPException(400, 'Perfil de demostración inválido')
+    with conn() as c:
+        ensure_demo_accounts(c)
+        row = c.execute('SELECT * FROM users WHERE username=? AND active=1', (spec['username'],)).fetchone()
+        if not row or row['role'] != spec['role']:
+            raise HTTPException(403, 'Cuenta de demostración no disponible')
+        if spec['role'] == 'astronaut' and not row['astronaut_id']:
+            raise HTTPException(403, 'Cuenta de astronauta sin identidad asignada')
+        token = _issue_session(c, row['username'])
+    audit(row['username'], f"demo_login:{spec['profile']}")
+    return {'token': token, 'role': row['role'], 'astronaut_id': row['astronaut_id'], 'username': row['username']}
+
+
 @app.post('/api/auth/login')
 def login(data:Login):
     with conn() as c: row=c.execute('SELECT * FROM users WHERE username=? AND active=1',(data.username,)).fetchone()
@@ -64,9 +187,8 @@ def login(data:Login):
     if not verify_password(data.password, row['password_hash']): raise HTTPException(401,'Credenciales inválidas')
     if '$' not in row['password_hash']:
         with conn() as c: c.execute('UPDATE users SET password_hash=? WHERE username=?',(hash_password(data.password),data.username))
-    token=secrets.token_urlsafe(32); expiry=datetime.now(timezone.utc).timestamp()+int(os.getenv('LATIRA_SESSION_TTL_SECONDS','43200'))
-    exp=datetime.fromtimestamp(expiry,timezone.utc).isoformat()
-    with conn() as c:c.execute('INSERT INTO sessions VALUES(?,?,?)',(token,data.username,exp))
+    with conn() as c:
+        token = _issue_session(c, data.username)
     audit(data.username,'login'); return {'token':token,'role':row['role'],'astronaut_id':row['astronaut_id'],'username':row['username']}
 @app.get('/api/me')
 def me(authorization:str|None=Header(None)):
@@ -101,14 +223,22 @@ def _set_owner_demo_state(c, aid: str, day: int, active: int):
     if aid == 'AST-001':
         c.execute('UPDATE demo_state SET day=?, active=? WHERE id=1', (day, active))
 
+def _clear_demo_scenario(c, aid: str) -> None:
+    c.execute(
+        'DELETE FROM followups WHERE alert_id IN (SELECT id FROM alerts WHERE demo=1 AND astronaut_id=?)',
+        (aid,),
+    )
+    c.execute('DELETE FROM alerts WHERE demo=1 AND astronaut_id=?', (aid,))
+    c.execute('DELETE FROM metrics WHERE demo=1 AND astronaut_id=?', (aid,))
+    c.execute('DELETE FROM checkins WHERE demo=1 AND astronaut_id=?', (aid,))
+
+
 @app.post('/api/demo/start')
-def demo_start(authorization:str|None=Header(None)):
+def demo_start(authorization:str|None=Header(default=None)):
     u=auth(authorization); need(u,'astronaut','admin')
     aid=_demo_target_aid(u)
     with conn() as c:
-        c.execute('DELETE FROM metrics WHERE demo=1 AND astronaut_id=?',(aid,))
-        c.execute('DELETE FROM alerts WHERE demo=1 AND astronaut_id=?',(aid,))
-        c.execute('DELETE FROM checkins WHERE demo=1 AND astronaut_id=?',(aid,))
+        _clear_demo_scenario(c, aid)
         _set_owner_demo_state(c, aid, 1, 1)
         add_demo_day(c, 1, aid)
     audit(u['username'],'demo_start'); return demo_status(aid)
@@ -144,13 +274,11 @@ def demo_next(authorization:str|None=Header(None)):
         add_demo_day(c, day, aid)
     audit(u['username'],'demo_next'); return demo_status(aid)
 @app.post('/api/demo/reset')
-def demo_reset(authorization:str|None=Header(None)):
+def demo_reset(authorization:str|None=Header(default=None)):
     u=auth(authorization); need(u,'astronaut','admin')
     aid=_demo_target_aid(u)
     with conn() as c:
-        c.execute('DELETE FROM metrics WHERE demo=1 AND astronaut_id=?',(aid,))
-        c.execute('DELETE FROM alerts WHERE demo=1 AND astronaut_id=?',(aid,))
-        c.execute('DELETE FROM checkins WHERE demo=1 AND astronaut_id=?',(aid,))
+        _clear_demo_scenario(c, aid)
         _set_owner_demo_state(c, aid, 0, 0)
     audit(u['username'],'demo_reset'); return demo_status(aid)
 def demo_status(astronaut_id='AST-001'):
@@ -186,8 +314,14 @@ def checkin(data:Checkin,authorization:str|None=Header(None)):
             else:
                 answer = f'Gracias por completar el chequeo (fatiga {data.fatigue}/5, ánimo {data.mood}/5). Tus valores autorreportados se mantienen estables. No es un diagnóstico; contacta al equipo médico si necesitas ayuda.'
             user_entry = f'[Chequeo diario: fatiga={data.fatigue}/5, ánimo={data.mood}/5]' + (f' {clean_note}' if clean_note else '')
-        c.execute('INSERT INTO conversations(astronaut_id,role,content,origin,created_at) VALUES(?,?,?,?,?)',(aid,'user',user_entry,'rules_local',stamp))
-        c.execute('INSERT INTO conversations(astronaut_id,role,content,origin,created_at) VALUES(?,?,?,?,?)',(aid,'assistant',answer,'rules_local',stamp))
+        c.execute(
+            'INSERT INTO conversations(astronaut_id,role,content,origin,created_at,input_mode,context_source) VALUES(?,?,?,?,?,?,?)',
+            (aid, 'user', user_entry, 'rules_local', stamp, 'text', 'authenticated_astronaut_records'),
+        )
+        c.execute(
+            'INSERT INTO conversations(astronaut_id,role,content,origin,created_at,input_mode,context_source) VALUES(?,?,?,?,?,?,?)',
+            (aid, 'assistant', answer, 'rules_local', stamp, 'text', 'authenticated_astronaut_records'),
+        )
     audit(u['username'],'daily_checkin'); return {'message':'Chequeo guardado','assistant':answer,'origin':'rules_local','demo':demo}
 
 @app.get('/api/checkins')
@@ -262,37 +396,28 @@ def remove_assignment(medic_username:str,astronaut_id:str,authorization:str|None
     with conn() as c:c.execute('DELETE FROM assignments WHERE medic_username=? AND astronaut_id=?',(medic_username,astronaut_id))
     audit(u['username'],'assignment_remove'); return {'ok':True}
 def _pose_integration_status():
-    import importlib.util
+    import sys
     from pathlib import Path
-    if importlib.util.find_spec('ultralytics') is None:
-        return {'status':'not_configured','reason':'YOLO Pose dependency/model not installed or configured.'}
-    model_cfg=os.getenv('YOLO_POSE_MODEL','yolo11n-pose.pt')
-    project_root=Path(__file__).resolve().parents[2]
-    candidates=[
-        Path(model_cfg),
-        project_root/model_cfg,
-        project_root/'ai'/model_cfg,
-        project_root/'backend'/model_cfg,
-    ]
-    found=next((p for p in candidates if p.is_file()), None)
-    if found is not None:
-        return {'status':'configured','reason':f'Ultralytics installed and local pose weights ready ({found.name}). Geometric keypoints only; not medical diagnosis.'}
-    return {'status':'not_configured','reason':f'Ultralytics installed; weights "{model_cfg}" not found locally yet (place {model_cfg} in LATIRA_2.0/ or configure YOLO_POSE_MODEL).'}
+    project_root = Path(__file__).resolve().parents[2]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from ai.setup_yolo import get_yolo_runtime_status
+    return get_yolo_runtime_status(verify_inference=False)
 
 def _lati_llm_status():
-    base_url = os.getenv('LATIRA_LLM_BASE_URL', '').strip()
-    api_key = os.getenv('LATIRA_LLM_API_KEY', '').strip()
-    if base_url and api_key:
-        return {
-            'status': 'configured',
-            'mode': 'optional_external_configured',
-            'reason': 'External LLM endpoint credentials configured; local rules remain active with full auditability.',
-        }
-    return {
-        'status': 'not_configured',
-        'mode': 'rules_local',
-        'reason': 'No external LLM configured. LÁTI operates exclusively with deterministic local rules and verified catalog sources.',
-    }
+    return get_lati_llm_status()
+
+@app.get('/api/lati/status')
+def lati_status(authorization:str|None=Header(None)):
+    u=auth(authorization); need(u,'astronaut','medic','admin')
+    return get_lati_llm_status()
+
+@app.post('/api/integrations/lati/verify')
+def verify_lati_integration(authorization:str|None=Header(None)):
+    u=auth(authorization); need(u,'admin')
+    status = verify_lati_llm_connection()
+    audit(u['username'], f"lati_llm_verify:{status.get('verification_status', 'unknown')}")
+    return status
 
 @app.get('/api/integrations')
 def integrations(authorization:str|None=Header(None)):

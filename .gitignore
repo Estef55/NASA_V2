@@ -1,4 +1,4 @@
-# Keep local secrets, virtual environments, caches, data, and generated media out of version control
+# Keep local secrets, virtualenvs, caches, build outputs, and runtime data out of version control / clean releases.
 .env
 .env.*
 !.env.example
@@ -6,15 +6,13 @@
 backend/.venv/
 __pycache__/
 *.py[cod]
-node_modules/
-frontend/node_modules/
-dist/
-frontend/dist/
-*.tsbuildinfo
 *.sqlite3
 *.db
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+*.tsbuildinfo
 data/
-data/uploads/
-data/processed/
-*.pt
-
+models/*.pt
+models/*.part
+*.zip
