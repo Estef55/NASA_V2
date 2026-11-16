@@ -1,0 +1,3 @@
+# Optional video-pose adapter dependencies; install only when enabling YOLO.
+ultralytics>=8.3,<9
+opencv-python-headless>=4.10,<5
